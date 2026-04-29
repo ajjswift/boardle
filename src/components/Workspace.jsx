@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import gameEngine from "../game";
 
 function InfoTrigger({ label, text, side, onShowTooltip, onHideTooltip }) {
@@ -192,9 +192,12 @@ function RackCompact({ short, overloaded, flash }) {
 }
 
 function ServerRoom({ units, overloaded, flashRackIndex, floatingTexts, capacityPercent }) {
-  const rackCount = Math.max(4, Math.ceil(units.length / 12));
+  const unitCount = units.length;
+  const rackCount = Math.max(4, Math.ceil(unitCount / 12));
   const rows = Math.ceil(rackCount / 4);
   const latestRowStart = Math.max(0, (rows - 1) * 4);
+  const fullRacks = Math.floor(unitCount / 12);
+  const partialUnits = unitCount % 12;
 
   return (
       <div
@@ -210,11 +213,12 @@ function ServerRoom({ units, overloaded, flashRackIndex, floatingTexts, capacity
               >
                   {Array.from({ length: rackCount }, (_, rackIndex) => {
                       const rackStart = rackIndex * 12;
-                      const rackUnits = Array.from(
-                          { length: 12 },
-                          (_, unitIndex) => units[rackStart + unitIndex],
-                      );
-                      const filledCount = rackUnits.filter(Boolean).length;
+                      const filledCount =
+                          rackIndex < fullRacks
+                              ? 12
+                              : rackIndex === fullRacks
+                                ? partialUnits
+                                : 0;
                       const isFull = filledCount === 12;
                       const shouldCompact =
                           rows > 1 && rackIndex < latestRowStart && isFull;
@@ -222,7 +226,7 @@ function ServerRoom({ units, overloaded, flashRackIndex, floatingTexts, capacity
                           flashRackIndex !== null &&
                           flashRackIndex >= rackStart &&
                           flashRackIndex < rackStart + 12;
-                      const summaryShort = rackUnits[0]?.short || "MIX";
+                      const summaryShort = units[rackStart]?.short || "MIX";
 
                       return (
                           <div
@@ -304,7 +308,10 @@ export default function Workspace(props) {
   } = props;
   const saveImportInputRef = useRef(null);
 
-  const units = gameEngine.getRackUnits(game);
+  const generatorOwnershipSignature = gameEngine.GENERATORS
+    .map((generator) => game.generators[generator.id]?.owned || 0)
+    .join("|");
+  const units = useMemo(() => gameEngine.getRackUnits(game), [generatorOwnershipSignature]);
 
   return (
     <div className={`workspace${game.activeIncident ? " incident-active" : ""}`}>

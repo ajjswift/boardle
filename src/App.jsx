@@ -20,6 +20,7 @@ export default function App() {
   const [provisionMessage, setProvisionMessage] = useState("");
   const telemetryRef = useRef([gameEngine.getTelemetrySnapshot(game)]);
   const gameRef = useRef(game);
+  const workerRef = useRef(null);
   const unlockedRef = useRef(new Set(gameEngine.GENERATORS.filter((generator) => generator.unlock(game)).map((generator) => generator.id)));
   const generatorRefs = useRef({});
 
@@ -33,27 +34,30 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    pushTelemetry(game);
-  }, [game, pushTelemetry]);
+    const worker = new Worker(new URL("./gameWorker.js", import.meta.url), { type: "module" });
+    workerRef.current = worker;
+    worker.onmessage = (event) => {
+      const message = event.data || {};
+      if (message.type !== "snapshot" || !message.state) {
+        return;
+      }
+      gameRef.current = message.state;
+      setGame(message.state);
+      pushTelemetry(message.state);
+    };
+    worker.postMessage({ type: "init", state: gameRef.current, paused: overlay.visible });
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+    };
+  }, [pushTelemetry]);
 
   useEffect(() => {
-    if (overlay.visible) {
-      return undefined;
+    if (!workerRef.current) {
+      return;
     }
-    let last = performance.now();
-    const intervalId = window.setInterval(() => {
-      const nowPerf = performance.now();
-      const delta = Math.min(0.5, (nowPerf - last) / 1000);
-      last = nowPerf;
-      setGame((prev) => {
-        const next = gameEngine.tickState(prev, delta, Date.now());
-        gameRef.current = next;
-        pushTelemetry(next);
-        return next;
-      });
-    }, gameEngine.TICK_INTERVAL);
-    return () => window.clearInterval(intervalId);
-  }, [overlay.visible, pushTelemetry]);
+    workerRef.current.postMessage({ type: "setPaused", paused: overlay.visible });
+  }, [overlay.visible]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -167,9 +171,19 @@ export default function App() {
     setTooltip(null);
   }, []);
 
-  const handleSetBuyMode = useCallback((mode) => {
-    setGame((prev) => ({ ...prev, buyMode: mode }));
+  const dispatchWorkerCommand = useCallback((command, payload = {}) => {
+    if (!workerRef.current) {
+      return;
+    }
+    workerRef.current.postMessage({ type: "command", command, payload });
   }, []);
+
+  const handleSetBuyMode = useCallback((mode) => {
+    const next = { ...gameRef.current, buyMode: mode };
+    gameRef.current = next;
+    setGame(next);
+    dispatchWorkerCommand("setBuyMode", { mode });
+  }, [dispatchWorkerCommand]);
 
   const handleBuyGenerator = useCallback((id) => {
     const next = gameEngine.buyGenerator(gameRef.current, id);
@@ -178,24 +192,27 @@ export default function App() {
       window.setTimeout(() => setPurchaseFlashId((current) => current === id ? null : current), 460);
       setGame(next);
       gameRef.current = next;
+      dispatchWorkerCommand("buyGenerator", { id });
     }
-  }, []);
+  }, [dispatchWorkerCommand]);
 
   const handleBuyUpgrade = useCallback((id) => {
     const next = gameEngine.buyUpgrade(gameRef.current, id);
     if (next !== gameRef.current) {
       setGame(next);
       gameRef.current = next;
+      dispatchWorkerCommand("buyUpgrade", { id });
     }
-  }, []);
+  }, [dispatchWorkerCommand]);
 
   const handleBuyPolicy = useCallback((id) => {
     const next = gameEngine.buyPolicy(gameRef.current, id);
     if (next !== gameRef.current) {
       setGame(next);
       gameRef.current = next;
+      dispatchWorkerCommand("buyPolicy", { id });
     }
-  }, []);
+  }, [dispatchWorkerCommand]);
 
   const handleToggleBoardView = useCallback(() => {
     setBoardViewOpen((current) => !current);
@@ -225,7 +242,8 @@ export default function App() {
     setProvisionFlashUntil(0);
     setProvisionMessage("");
     setBoardViewOpen(false);
-  }, []);
+    dispatchWorkerCommand("replaceState", { state: fresh });
+  }, [dispatchWorkerCommand]);
 
   const handleDownloadSave = useCallback(() => {
     const snapshot = gameEngine.prepareSaveState(gameRef.current);
@@ -262,21 +280,23 @@ export default function App() {
       setProvisionFlashUntil(0);
       setProvisionMessage("");
       setBoardViewOpen(false);
+      dispatchWorkerCommand("replaceState", { state: loaded });
     } catch (error) {
       console.warn("NimbusCore import failed", error);
       window.alert("Import failed. Please select a valid NimbusCore save JSON file.");
     }
-  }, []);
+  }, [dispatchWorkerCommand]);
 
   const handleProvision = useCallback(() => {
     const result = gameEngine.provisionClick(gameRef.current);
     setGame(result.state);
     gameRef.current = result.state;
+    dispatchWorkerCommand("provision");
     setProvisionFlashUntil(Date.now() + 120);
     setProvisionMessage(`✓ +${gameEngine.formatNumber(result.gain)} CU provisioned  ·  total ${gameEngine.formatCU(result.state.cu)}`);
-    const units = gameEngine.getRackUnits(result.state);
-    if (units.length) {
-      setFlashRackIndex(Math.floor(Math.random() * units.length));
+    const totalUnits = gameEngine.getTotalRackUnits(result.state);
+    if (totalUnits > 0) {
+      setFlashRackIndex(Math.floor(Math.random() * totalUnits));
     }
     setFloatingTexts((items) => [
       ...items,
@@ -289,15 +309,16 @@ export default function App() {
       }
     ]);
     window.setTimeout(() => setProvisionMessage(""), 1500);
-  }, []);
+  }, [dispatchWorkerCommand]);
 
   const handleResolveIncident = useCallback(() => {
     const next = gameEngine.resolveIncident(gameRef.current);
     if (next !== gameRef.current) {
       setGame(next);
       gameRef.current = next;
+      dispatchWorkerCommand("resolveIncident");
     }
-  }, []);
+  }, [dispatchWorkerCommand]);
 
   const handleProceedToIPO = useCallback(() => {
     setOverlay((current) => ({ ...current, phase: "processing", subtitle: "" }));
@@ -309,6 +330,7 @@ export default function App() {
       setGame(next);
       gameRef.current = next;
       telemetryRef.current = [gameEngine.getTelemetrySnapshot(next)];
+      dispatchWorkerCommand("replaceState", { state: next });
       setOverlay({
         visible: true,
         phase: "legacy",
@@ -317,7 +339,7 @@ export default function App() {
         legacyText: `Former employees: ${gameEngine.formatNumber(next.formerEmployees)}\nSeverance package: [LEGACY BONUS] ${gameEngine.formatMultiplier(next.legacyMultiplier)} permanent CU multiplier`
       });
     }, 5000);
-  }, []);
+  }, [dispatchWorkerCommand]);
 
   const handleContinueAfterPrestige = useCallback(() => {
     setOverlay((current) => ({ ...current, visible: false, phase: "offer" }));

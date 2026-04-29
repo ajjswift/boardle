@@ -814,6 +814,10 @@ const NimbusCoreGame = (() => {
     return null;
   }
 
+  function getTotalRackUnits(state) {
+    return GENERATORS.reduce((sum, generator) => sum + getGeneratorOwned(state, generator.id), 0);
+  }
+
   function getRackUnits(state) {
     const units = [];
     GENERATORS.forEach((generator) => {
@@ -907,9 +911,9 @@ const NimbusCoreGame = (() => {
   }
 
   function getCapacityPercent(state) {
-    const units = getRackUnits(state).length;
-    const rackCount = Math.max(4, Math.ceil(units / 12));
-    return rackCount * 12 ? Math.min(100, (units / (rackCount * 12)) * 100) : 0;
+    const unitCount = getTotalRackUnits(state);
+    const rackCount = Math.max(4, Math.ceil(unitCount / 12));
+    return rackCount * 12 ? Math.min(100, (unitCount / (rackCount * 12)) * 100) : 0;
   }
 
   function activateIncident(state, incidentId, now = Date.now()) {
@@ -1370,6 +1374,7 @@ const NimbusCoreGame = (() => {
     buildUpgradeTooltip,
     getIncidentUi,
     getUnlockProgress,
+    getTotalRackUnits,
     getRackUnits,
     getCapacityPercent,
     getClientThresholdText,
