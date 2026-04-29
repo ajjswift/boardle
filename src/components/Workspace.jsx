@@ -123,6 +123,7 @@ function BoardTree({ game, boardVoteProgress, onBuyPolicy, onShowTooltip, onHide
                 const isOwned = level <= owned;
                 const isNext = level === owned + 1;
                 const isHidden = level > owned + 1;
+                const levelCost = gameEngine.getPolicyCost(policy, level);
                 if (isHidden) {
                   return <div key={level} className="board-node hidden"></div>;
                 }
@@ -145,7 +146,7 @@ function BoardTree({ game, boardVoteProgress, onBuyPolicy, onShowTooltip, onHide
                     <span className="board-node-tier">T{level}</span>
                     <span className="board-node-state">{isOwned ? "ACTIVE" : "AVAILABLE"}</span>
                     <span className="board-node-cost">
-                      {isOwned ? "locked in" : `${gameEngine.getPolicyCost(policy, level)} vote${gameEngine.getPolicyCost(policy, level) === 1 ? "" : "s"}`}
+                      {isOwned ? "locked in" : `${levelCost} vote${levelCost === 1 ? "" : "s"}`}
                     </span>
                   </button>
                 );
@@ -196,53 +197,80 @@ function ServerRoom({ units, overloaded, flashRackIndex, floatingTexts, capacity
   const latestRowStart = Math.max(0, (rows - 1) * 4);
 
   return (
-    <div className="rack-stage" style={{ "--capacity-fill": `${capacityPercent}%` }}>
-      <div className="rack-enclosure">
-        <div className="rack-grid" style={{ gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: rackCount }, (_, rackIndex) => {
-            const rackStart = rackIndex * 12;
-            const rackUnits = Array.from({ length: 12 }, (_, unitIndex) => units[rackStart + unitIndex]);
-            const filledCount = rackUnits.filter(Boolean).length;
-            const isFull = filledCount === 12;
-            const shouldCompact = rows > 1 && rackIndex < latestRowStart && isFull;
-            const rackFlash = flashRackIndex !== null && flashRackIndex >= rackStart && flashRackIndex < rackStart + 12;
-            const summaryShort = rackUnits[0]?.short || "MIX";
+      <div
+          className="rack-stage"
+          style={{ "--capacity-fill": `${capacityPercent}%` }}
+      >
+          <div className="rack-enclosure">
+              <div
+                  className="rack-grid"
+                  style={{
+                      gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+                  }}
+              >
+                  {Array.from({ length: rackCount }, (_, rackIndex) => {
+                      const rackStart = rackIndex * 12;
+                      const rackUnits = Array.from(
+                          { length: 12 },
+                          (_, unitIndex) => units[rackStart + unitIndex],
+                      );
+                      const filledCount = rackUnits.filter(Boolean).length;
+                      const isFull = filledCount === 12;
+                      const shouldCompact =
+                          rows > 1 && rackIndex < latestRowStart && isFull;
+                      const rackFlash =
+                          flashRackIndex !== null &&
+                          flashRackIndex >= rackStart &&
+                          flashRackIndex < rackStart + 12;
+                      const summaryShort = rackUnits[0]?.short || "MIX";
 
-            return (
-              <div className={`rack${shouldCompact ? " compact" : ""}`} key={rackIndex}>
-                {shouldCompact ? (
-                  <RackCompact short={summaryShort} overloaded={overloaded} flash={rackFlash} />
-                ) : (
-                  Array.from({ length: 12 }, (_, unitIndex) => {
-                    const flatIndex = rackStart + unitIndex;
-                    const unit = units[flatIndex];
-                    return (
-                      <RackUnit
-                        key={flatIndex}
-                        filled={!!unit}
-                        short={unit ? unit.short : ""}
-                        overloaded={overloaded}
-                        flash={flashRackIndex === flatIndex}
-                        index={flatIndex}
-                      />
-                    );
-                  })
-                )}
+                      return (
+                          <div
+                              className={`rack${shouldCompact ? " compact" : ""}`}
+                              key={rackIndex}
+                          >
+                              {shouldCompact ? (
+                                  <RackCompact
+                                      short={summaryShort}
+                                      overloaded={overloaded}
+                                      flash={rackFlash}
+                                  />
+                              ) : (
+                                  Array.from({ length: 12 }, (_, unitIndex) => {
+                                      const flatIndex = rackStart + unitIndex;
+                                      const unit = units[flatIndex];
+                                      return (
+                                          <RackUnit
+                                              key={flatIndex}
+                                              filled={!!unit}
+                                              short={unit ? unit.short : ""}
+                                              overloaded={overloaded}
+                                              flash={
+                                                  flashRackIndex === flatIndex
+                                              }
+                                              index={flatIndex}
+                                          />
+                                      );
+                                  })
+                              )}
+                          </div>
+                      );
+                  })}
               </div>
-            );
-          })}
-        </div>
-        {!units.length ? <div className="rack-empty-label">No billable infrastructure detected</div> : null}
-      </div>
-
-      <div className="floating-layer">
-        {floatingTexts.map((item) => (
-          <div key={item.id} className="floating-text" style={{ left: `${item.left}%`, top: `${item.top}%` }}>
-            {item.text}
           </div>
-        ))}
+
+          <div className="floating-layer">
+              {floatingTexts.map((item) => (
+                  <div
+                      key={item.id}
+                      className="floating-text"
+                      style={{ left: `${item.left}%`, top: `${item.top}%` }}
+                  >
+                      {item.text}
+                  </div>
+              ))}
+          </div>
       </div>
-    </div>
   );
 }
 

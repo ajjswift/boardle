@@ -7,6 +7,7 @@ const NimbusCoreGame = (() => {
   const INCIDENT_UNLOCK_RATE = 50;
   const INCIDENT_INTERVAL_MIN = 180000;
   const INCIDENT_INTERVAL_MAX = 360000;
+  const UNLOCK_ETA_CACHE_TTL_MS = 4000;
   const SAVE_INTERVAL = 10000;
   const TICK_INTERVAL = 100;
 
@@ -309,6 +310,13 @@ const NimbusCoreGame = (() => {
 
   function randomBetween(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function quantize(value, step) {
+    if (!Number.isFinite(value) || step <= 0) {
+      return 0;
+    }
+    return Math.floor(value / step);
   }
 
   function getNextIncidentDelay() {
@@ -705,25 +713,38 @@ const NimbusCoreGame = (() => {
     simState.lifetimeCU += rate * seconds;
   }
 
-  function estimateUnlockEta(generator, state) {
+  function estimateUnlockEta(generator, state, metrics = null) {
     if (generator.unlock(state)) {
       return 0;
     }
+    const currentRate = metrics?.rate ?? getProductionRate(state);
+    const currentClients = metrics?.clients ?? getClients(state);
     const cacheKey = [
       generator.id,
-      Math.floor(state.cu),
-      Math.floor(state.lifetimeCU),
-      Math.floor(getProductionRate(state) * 10),
-      getClients(state),
+      quantize(state.cu, 500),
+      quantize(state.lifetimeCU, 2000),
+      quantize(currentRate, 5),
+      quantize(currentClients, 2),
       ...GENERATORS.map((item) => getGeneratorOwned(state, item.id))
     ].join("|");
     const cached = unlockEtaCache.get(cacheKey);
-    if (cached && Date.now() - cached.at < 1000) {
+    if (cached && Date.now() - cached.at < UNLOCK_ETA_CACHE_TTL_MS) {
       return cached.value;
+    }
+    if (unlockEtaCache.size > 2000) {
+      const cutoff = Date.now() - UNLOCK_ETA_CACHE_TTL_MS * 2;
+      for (const [key, entry] of unlockEtaCache.entries()) {
+        if (entry.at < cutoff) {
+          unlockEtaCache.delete(key);
+        }
+      }
+      if (unlockEtaCache.size > 2000) {
+        unlockEtaCache.clear();
+      }
     }
     const simState = cloneState(state);
     let elapsed = 0;
-    for (let step = 0; step < 480 && elapsed < 172800; step += 1) {
+    for (let step = 0; step < 300 && elapsed < 86400; step += 1) {
       if (generator.unlock(simState)) {
         unlockEtaCache.set(cacheKey, { value: elapsed, at: Date.now() });
         return elapsed;
@@ -766,28 +787,29 @@ const NimbusCoreGame = (() => {
 
   function getUnlockProgress(generator, state) {
     const rate = getProductionRate(state);
+    const clients = getClients(state);
     if (generator.id === "dedicated") {
-      const current = getClients(state);
-      return { current, target: 50, unit: "clients", progress: Math.min(1, current / 50), eta: estimateUnlockEta(generator, state) };
+      const current = clients;
+      return { current, target: 50, unit: "clients", progress: Math.min(1, current / 50), eta: estimateUnlockEta(generator, state, { rate, clients }) };
     }
     if (generator.id === "rack") {
-      return { current: rate, target: 200, unit: "CU/s", progress: Math.min(1, rate / 200), eta: estimateUnlockEta(generator, state) };
+      return { current: rate, target: 200, unit: "CU/s", progress: Math.min(1, rate / 200), eta: estimateUnlockEta(generator, state, { rate, clients }) };
     }
     if (generator.id === "pod") {
       const current = getGeneratorOwned(state, "rack");
-      return { current, target: 10, unit: "racks", progress: Math.min(1, current / 10), eta: estimateUnlockEta(generator, state) };
+      return { current, target: 10, unit: "racks", progress: Math.min(1, current / 10), eta: estimateUnlockEta(generator, state, { rate, clients }) };
     }
     if (generator.id === "region") {
       const current = getGeneratorOwned(state, "pod");
-      return { current, target: 5, unit: "pods", progress: Math.min(1, current / 5), eta: estimateUnlockEta(generator, state) };
+      return { current, target: 5, unit: "pods", progress: Math.min(1, current / 5), eta: estimateUnlockEta(generator, state, { rate, clients }) };
     }
     if (generator.id === "cable") {
       const current = getGeneratorOwned(state, "region");
-      return { current, target: 3, unit: "regions", progress: Math.min(1, current / 3), eta: estimateUnlockEta(generator, state) };
+      return { current, target: 3, unit: "regions", progress: Math.min(1, current / 3), eta: estimateUnlockEta(generator, state, { rate, clients }) };
     }
     if (generator.id === "orbital") {
       const current = state.lifetimeCU;
-      return { current, target: 500000, unit: "lifetime CU", progress: Math.min(1, current / 500000), eta: estimateUnlockEta(generator, state) };
+      return { current, target: 500000, unit: "lifetime CU", progress: Math.min(1, current / 500000), eta: estimateUnlockEta(generator, state, { rate, clients }) };
     }
     return null;
   }
