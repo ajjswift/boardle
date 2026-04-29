@@ -4,6 +4,9 @@ const NimbusCoreGame = (() => {
   const IPO_TARGET_PRESTIGE_SCALE = 1.25;
   const BOARD_VOTE_BASE_STEP = 350000;
   const BOARD_VOTE_STEP_GROWTH = 1.35;
+  const INCIDENT_UNLOCK_RATE = 50;
+  const INCIDENT_INTERVAL_MIN = 180000;
+  const INCIDENT_INTERVAL_MAX = 360000;
   const SAVE_INTERVAL = 10000;
   const TICK_INTERVAL = 100;
 
@@ -218,21 +221,21 @@ const NimbusCoreGame = (() => {
 
   function getIncidentSeverity(state) {
     const progress = Math.max(0, state.lifetimeCU / Math.max(1, getIpoTarget(state)));
-    const progressFactor = Math.min(2.2, progress);
-    const prestigeFactor = Math.max(0, state.prestigeCount || 0) * 0.15;
-    return 1 + progressFactor * 0.75 + prestigeFactor;
+    const progressFactor = Math.min(2.4, progress);
+    const prestigeFactor = Math.max(0, state.prestigeCount || 0) * 0.22;
+    return 1.1 + progressFactor * 1.1 + prestigeFactor;
   }
 
   function getIncidentDurationMultiplier(severity) {
-    return Math.min(2.25, 1 + Math.max(0, severity - 1) * 0.55);
+    return Math.min(2.8, 1 + Math.max(0, severity - 1) * 0.7);
   }
 
   function getDdosPenalty(severity) {
-    return Math.max(0.2, 0.5 - Math.max(0, severity - 1) * 0.12);
+    return Math.max(0.12, 0.45 - Math.max(0, severity - 1) * 0.16);
   }
 
   function getTweetCrashMultiplier(severity) {
-    return Math.max(0.2, 0.5 - Math.max(0, severity - 1) * 0.11);
+    return Math.max(0.12, 0.45 - Math.max(0, severity - 1) * 0.14);
   }
 
   function createInitialState() {
@@ -265,7 +268,7 @@ const NimbusCoreGame = (() => {
       ceoCrashMultiplier: 0.5,
       incidentsDisabled: false,
       activeIncident: null,
-      nextIncidentAt: Date.now() + randomBetween(90000, 180000),
+      nextIncidentAt: Date.now() + getNextIncidentDelay(),
       lastSave: Date.now(),
       lastProductionSnapshot: 0,
       offlineEarnings: 0,
@@ -306,6 +309,10 @@ const NimbusCoreGame = (() => {
 
   function randomBetween(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function getNextIncidentDelay() {
+    return randomBetween(INCIDENT_INTERVAL_MIN, INCIDENT_INTERVAL_MAX);
   }
 
   function getGeneratorOwned(state, id) {
@@ -501,7 +508,7 @@ const NimbusCoreGame = (() => {
         }
         state.activeIncident = null;
       }
-      state.nextIncidentAt = Date.now() + randomBetween(90000, 180000);
+      state.nextIncidentAt = Date.now() + getNextIncidentDelay();
       enqueueTicker(state, "On-call engineering activated. Incident queue moved to managed operations.");
     } else if (upgradeId === "ai") {
       state.productionMultiplier *= 2;
@@ -922,7 +929,7 @@ const NimbusCoreGame = (() => {
       }
     }
     next.activeIncident = null;
-    next.nextIncidentAt = Date.now() + randomBetween(90000, 180000);
+    next.nextIncidentAt = Date.now() + getNextIncidentDelay();
     return next;
   }
 
@@ -1061,6 +1068,12 @@ const NimbusCoreGame = (() => {
     }
     if (next.activeIncident && now >= next.activeIncident.endsAt) {
       return clearIncident(next, false);
+    }
+    if (!next.activeIncident && rate < INCIDENT_UNLOCK_RATE) {
+      if (next.nextIncidentAt <= now) {
+        next.nextIncidentAt = now + getNextIncidentDelay();
+      }
+      return next;
     }
     if (!next.activeIncident && now >= next.nextIncidentAt) {
       const incidentIds = Object.keys(INCIDENT_DEFINITIONS);

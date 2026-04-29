@@ -227,6 +227,47 @@ export default function App() {
     setBoardViewOpen(false);
   }, []);
 
+  const handleDownloadSave = useCallback(() => {
+    const snapshot = gameEngine.prepareSaveState(gameRef.current);
+    const payload = JSON.stringify(snapshot, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "nimbuscore-save.json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleImportSave = useCallback(async (file) => {
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw);
+      localStorage.setItem(gameEngine.STORAGE_KEY, JSON.stringify(parsed));
+      const loaded = gameEngine.loadState();
+      setGame(loaded);
+      gameRef.current = loaded;
+      telemetryRef.current = [gameEngine.getTelemetrySnapshot(loaded)];
+      unlockedRef.current = new Set(gameEngine.GENERATORS.filter((generator) => generator.unlock(loaded)).map((generator) => generator.id));
+      setTooltip(null);
+      setOverlay({ visible: false, phase: "offer", title: "NimbusCore™", subtitle: "Series D — $2.4B Valuation", legacyText: "" });
+      setIpoOfferDismissedAtPrestige(null);
+      setProvisionHover(false);
+      setFloatingTexts([]);
+      setFlashRackIndex(null);
+      setPurchaseFlashId(null);
+      setNewUnlockId(null);
+      setProvisionFlashUntil(0);
+      setProvisionMessage("");
+      setBoardViewOpen(false);
+    } catch (error) {
+      console.warn("NimbusCore import failed", error);
+      window.alert("Import failed. Please select a valid NimbusCore save JSON file.");
+    }
+  }, []);
+
   const handleProvision = useCallback(() => {
     const result = gameEngine.provisionClick(gameRef.current);
     setGame(result.state);
@@ -426,6 +467,8 @@ export default function App() {
           onBuyPolicy={handleBuyPolicy}
           onProvision={handleProvision}
           onToggleBoardView={handleToggleBoardView}
+          onDownloadSave={handleDownloadSave}
+          onImportSave={handleImportSave}
           onResetSave={handleResetSave}
           onProvisionHover={setProvisionHover}
           onResolveIncident={handleResolveIncident}

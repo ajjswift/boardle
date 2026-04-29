@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import gameEngine from "../game";
 
 function InfoTrigger({ label, text, side, onShowTooltip, onHideTooltip }) {
@@ -171,32 +172,65 @@ function RackUnit({ filled, short, overloaded, flash, index }) {
   );
 }
 
+function RackCompact({ short, overloaded, flash }) {
+  return (
+    <div className={`rack-compact${overloaded ? " overloaded" : ""}${flash ? " flash" : ""}`}>
+      <div className="rack-compact-top">
+        <span className="rack-compact-led"></span>
+        <span className="rack-compact-title">{short || "MIX"}</span>
+        <span className="rack-compact-capacity">12U</span>
+      </div>
+      <div className="rack-compact-bars">
+        {Array.from({ length: 6 }, (_, index) => (
+          <span key={index}></span>
+        ))}
+      </div>
+      <div className="rack-compact-meta">Legacy row summarised</div>
+    </div>
+  );
+}
+
 function ServerRoom({ units, overloaded, flashRackIndex, floatingTexts, capacityPercent }) {
   const rackCount = Math.max(4, Math.ceil(units.length / 12));
   const rows = Math.ceil(rackCount / 4);
+  const latestRowStart = Math.max(0, (rows - 1) * 4);
 
   return (
     <div className="rack-stage" style={{ "--capacity-fill": `${capacityPercent}%` }}>
       <div className="rack-enclosure">
         <div className="rack-grid" style={{ gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
-          {Array.from({ length: rackCount }, (_, rackIndex) => (
-            <div className="rack" key={rackIndex}>
-              {Array.from({ length: 12 }, (_, unitIndex) => {
-                const flatIndex = rackIndex * 12 + unitIndex;
-                const unit = units[flatIndex];
-                return (
-                  <RackUnit
-                    key={flatIndex}
-                    filled={!!unit}
-                    short={unit ? unit.short : ""}
-                    overloaded={overloaded}
-                    flash={flashRackIndex === flatIndex}
-                    index={flatIndex}
-                  />
-                );
-              })}
-            </div>
-          ))}
+          {Array.from({ length: rackCount }, (_, rackIndex) => {
+            const rackStart = rackIndex * 12;
+            const rackUnits = Array.from({ length: 12 }, (_, unitIndex) => units[rackStart + unitIndex]);
+            const filledCount = rackUnits.filter(Boolean).length;
+            const isFull = filledCount === 12;
+            const shouldCompact = rows > 1 && rackIndex < latestRowStart && isFull;
+            const rackFlash = flashRackIndex !== null && flashRackIndex >= rackStart && flashRackIndex < rackStart + 12;
+            const summaryShort = rackUnits[0]?.short || "MIX";
+
+            return (
+              <div className={`rack${shouldCompact ? " compact" : ""}`} key={rackIndex}>
+                {shouldCompact ? (
+                  <RackCompact short={summaryShort} overloaded={overloaded} flash={rackFlash} />
+                ) : (
+                  Array.from({ length: 12 }, (_, unitIndex) => {
+                    const flatIndex = rackStart + unitIndex;
+                    const unit = units[flatIndex];
+                    return (
+                      <RackUnit
+                        key={flatIndex}
+                        filled={!!unit}
+                        short={unit ? unit.short : ""}
+                        overloaded={overloaded}
+                        flash={flashRackIndex === flatIndex}
+                        index={flatIndex}
+                      />
+                    );
+                  })
+                )}
+              </div>
+            );
+          })}
         </div>
         {!units.length ? <div className="rack-empty-label">No billable infrastructure detected</div> : null}
       </div>
@@ -231,6 +265,8 @@ export default function Workspace(props) {
     onBuyPolicy,
     onProvision,
     onToggleBoardView,
+    onDownloadSave,
+    onImportSave,
     onResetSave,
     onProvisionHover,
     onResolveIncident,
@@ -238,6 +274,7 @@ export default function Workspace(props) {
     onHideTooltip,
     registerGeneratorRef
   } = props;
+  const saveImportInputRef = useRef(null);
 
   const units = gameEngine.getRackUnits(game);
 
@@ -393,6 +430,33 @@ export default function Workspace(props) {
               <button type="button" className={`board-decisions-button panel-footer${boardViewOpen ? " active" : ""}`} onClick={onToggleBoardView}>
                 {boardViewOpen ? "Return to Server Room" : "Board Decisions"}
               </button>
+              <button type="button" className="save-transfer-button" onClick={onDownloadSave}>
+                Download Save
+              </button>
+              <button
+                type="button"
+                className="save-transfer-button"
+                onClick={() => {
+                  if (saveImportInputRef.current) {
+                    saveImportInputRef.current.click();
+                  }
+                }}
+              >
+                Import Save
+              </button>
+              <input
+                ref={saveImportInputRef}
+                className="save-import-input"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => {
+                  const file = event.target.files && event.target.files[0];
+                  if (file) {
+                    onImportSave(file);
+                  }
+                  event.target.value = "";
+                }}
+              />
               <button type="button" className="reset-save-button" onClick={onResetSave}>
                 Reset Save
               </button>
