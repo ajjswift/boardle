@@ -428,10 +428,17 @@ function useGlobe(
 export default function App() {
     const [state, setState] = useState(() => gameEngine.loadState());
     const [activeNav, setActiveNav] = useState("main");
+    const [prestigeOverlay, setPrestigeOverlay] = useState({
+        visible: false,
+        showDecision: false,
+        showSummary: false,
+        summary: null,
+    });
     const workerRef = useRef(null);
     const telemetryRef = useRef([gameEngine.getTelemetrySnapshot(state)]);
     const skillTooltipRef = useRef(null);
     const uiTooltipRef = useRef(null);
+    const prestigeTimersRef = useRef([]);
 
     const syncFromWorker = useCallback((nextState) => {
         setState(nextState);
@@ -481,6 +488,10 @@ export default function App() {
         setState(next);
     }, []);
 
+    const resetTelemetry = useCallback((nextState) => {
+        telemetryRef.current = [gameEngine.getTelemetrySnapshot(nextState)];
+    }, []);
+
     const withOptimistic = useCallback(
         (next, workerCommand, payload = {}) => {
             if (next === state) return;
@@ -508,6 +519,8 @@ export default function App() {
         return () => {
             clearSkillTooltip();
             clearUiTooltip();
+            prestigeTimersRef.current.forEach((id) => window.clearTimeout(id));
+            prestigeTimersRef.current = [];
         };
     }, [clearSkillTooltip, clearUiTooltip]);
 
@@ -690,7 +703,43 @@ export default function App() {
 
     const handlePrestige = () => {
         if (!gameEngine.maybeOpenPrestige(state)) return;
+        const preState = state;
         const next = gameEngine.applyPrestige(state);
+        const tokensAwarded = Math.max(
+            0,
+            (next.prestigeTokens || 0) - (preState.prestigeTokens || 0),
+        );
+        const summary = {
+            lifetimeCU: preState.lifetimeCU || 0,
+            peakRate: preState.peakRate || 0,
+            clients: preState.clients || 0,
+            tokensAwarded,
+            prestigeCount: next.prestigeCount || 0,
+        };
+
+        prestigeTimersRef.current.forEach((id) => window.clearTimeout(id));
+        prestigeTimersRef.current = [];
+        setPrestigeOverlay({
+            visible: true,
+            showDecision: false,
+            showSummary: false,
+            summary,
+        });
+        const decisionTimer = window.setTimeout(() => {
+            setPrestigeOverlay((current) => ({
+                ...current,
+                showDecision: true,
+            }));
+        }, 2000);
+        const summaryTimer = window.setTimeout(() => {
+            setPrestigeOverlay((current) => ({
+                ...current,
+                showSummary: true,
+            }));
+        }, 7000);
+        prestigeTimersRef.current = [decisionTimer, summaryTimer];
+
+        resetTelemetry(next);
         patchState(next);
         sendCommand("prestige");
     };
@@ -1489,6 +1538,78 @@ export default function App() {
                     ) : null}
                 </main>
             </div>
+
+            {prestigeOverlay.visible ? (
+                <div className="prestige-overlay">
+                    <div className="prestige-overlay-panel">
+                        <div className="prestige-company">NimbusCore™</div>
+                        {prestigeOverlay.showDecision ? (
+                            <div className="prestige-decision">
+                                The board has made a decision.
+                            </div>
+                        ) : null}
+                        {prestigeOverlay.showSummary &&
+                        prestigeOverlay.summary ? (
+                            <div className="prestige-summary">
+                                <div className="prestige-summary-row">
+                                    <span>Playthrough Lifetime CU</span>
+                                    <strong>
+                                        {gameEngine.formatCU(
+                                            prestigeOverlay.summary.lifetimeCU,
+                                        )}
+                                    </strong>
+                                </div>
+                                <div className="prestige-summary-row">
+                                    <span>Peak CU/s</span>
+                                    <strong>
+                                        {gameEngine.formatNumber(
+                                            prestigeOverlay.summary.peakRate,
+                                        )}{" "}
+                                        CU/s
+                                    </strong>
+                                </div>
+                                <div className="prestige-summary-row">
+                                    <span>Clients Served</span>
+                                    <strong>
+                                        {gameEngine.formatNumber(
+                                            prestigeOverlay.summary.clients,
+                                        )}
+                                    </strong>
+                                </div>
+                                <div className="prestige-summary-row">
+                                    <span>Prestige Tokens Awarded</span>
+                                    <strong>
+                                        {gameEngine.formatNumber(
+                                            prestigeOverlay.summary
+                                                .tokensAwarded,
+                                        )}
+                                    </strong>
+                                </div>
+                                <div className="prestige-summary-row">
+                                    <span>New Prestige Count</span>
+                                    <strong>
+                                        {prestigeOverlay.summary.prestigeCount}
+                                    </strong>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="prestige-close"
+                                    onClick={() =>
+                                        setPrestigeOverlay({
+                                            visible: false,
+                                            showDecision: false,
+                                            showSummary: false,
+                                            summary: null,
+                                        })
+                                    }
+                                >
+                                    Return to Operations
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }
